@@ -1,11 +1,8 @@
-// src/App.jsx
 import React, { useState, useEffect } from 'react';
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
-import { doc, collection, onSnapshot, addDoc, query, where } from "firebase/firestore";
+import { doc, collection, onSnapshot, addDoc, query, where, setDoc } from "firebase/firestore";
 import { auth, db, googleProvider } from './lib/firebase';
 import { DEFAULT_TEMPLATES } from './lib/utils';
-
-// Components
 import { Icons } from './assets/Icons';
 import { ToastProvider } from './components/Toast';
 import NavButton from './components/NavButton';
@@ -61,12 +58,10 @@ function App() {
     useEffect(() => {
         if (!targetUserId) return;
         
-        // Company Info
         const unsubInfo = onSnapshot(doc(db, 'artifacts', appId, 'users', targetUserId, 'companySettings', 'info'), (s) => { 
             if (s.exists()) setCompanyInfo(s.data()); 
         });
 
-        // Templates
         const templatesRef = collection(db, 'artifacts', appId, 'users', targetUserId, 'templates');
         const unsubTemplates = onSnapshot(templatesRef, async (s) => {
             const t = s.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -78,7 +73,6 @@ function App() {
             }
         });
         
-        // Inquiries Badge (Only for owner)
         let unsubInquiries = () => {};
         if (!isPublicMode && user) {
                 const inquiriesRef = collection(db, 'artifacts', appId, 'users', user.uid, 'inquiries');
@@ -96,11 +90,11 @@ function App() {
         catch (error) { console.error(error); alert("登入失敗"); } 
     };
     
+    // [修正] 改為回傳 Promise，並清除 undefined 欄位，讓 CompanySettings 處理 UI 狀態
     const saveCompanyInfo = async (newInfo) => { 
-        try { 
-            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'companySettings', 'info'), newInfo); 
-            setView('overview'); 
-        } catch (error) { alert("儲存失敗"); } 
+        // Firestore 不接受 undefined 值，使用 JSON 轉換技巧快速清除
+        const cleanInfo = JSON.parse(JSON.stringify(newInfo));
+        return await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'companySettings', 'info'), cleanInfo);
     };
 
     if (!authInitialized) return <div className="min-h-screen flex items-center justify-center font-bold tracking-widest text-xl">SYSTEM LOADING...</div>;
@@ -118,10 +112,14 @@ function App() {
     if (!user) {
         return (
             <div className={`min-h-screen flex items-center justify-center relative overflow-hidden ${theme === 'dark' ? 'bg-dc-black' : 'bg-dc-light'}`}>
-                {/* ... Login UI (Copy from HTML) ... */}
+                <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+                    <div className={`absolute top-[-20%] -left-20 w-[800px] h-[800px] rounded-full mix-blend-multiply filter blur-[100px] opacity-20 animate-blob ${theme === 'dark' ? 'bg-dc-orange' : 'bg-blue-200'}`}></div>
+                    <div className={`absolute top-[-20%] right-[-20%] w-[800px] h-[800px] rounded-full mix-blend-multiply filter blur-[100px] opacity-20 animate-blob animation-delay-2000 ${theme === 'dark' ? 'bg-purple-600' : 'bg-orange-200'}`}></div>
+                </div>
                 <div className={`p-16 shadow-2xl max-w-md w-full text-center relative z-10 rounded-4xl border backdrop-blur-xl ${theme === 'dark' ? 'bg-dc-panel/80 border-white/10' : 'bg-white/80 border-gray-200'}`}>
                     <div className="w-24 h-24 rounded-3xl bg-dc-orange flex items-center justify-center mx-auto mb-8 shadow-lg shadow-dc-orange/30 rotate-6"><Icons.FileText className="w-12 h-12 text-white" /></div>
                     <h1 className={`text-5xl font-bold mb-4 tracking-tight ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>DC QUOTE</h1>
+                    <p className="text-dc-gray mb-12 font-medium text-lg">智慧報價 CRM 系統</p>
                     <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-4 bg-dc-orange text-white py-5 px-8 rounded-full font-bold text-xl hover:scale-105 transition-all shadow-xl"><Icons.User className="w-6 h-6" /> Google 登入</button>
                 </div>
             </div>
@@ -132,18 +130,17 @@ function App() {
     return (
         <ToastProvider>
             <div className={`min-h-screen flex flex-col relative ${theme === 'dark' ? 'bg-dc-black text-dc-light' : 'bg-dc-light text-gray-800'}`}>
-                {/* Header */}
                 <header className={`border-b px-6 py-4 flex justify-between items-center sticky top-0 z-50 backdrop-blur-xl ${theme === 'dark' ? 'bg-dc-black/80 border-white/5' : 'bg-white/80 border-gray-200'}`}>
                     <div className="flex items-center gap-3">
                         <div className="bg-dc-orange p-2 rounded-xl text-white shadow-lg"><Icons.FileText className="w-5 h-5" /></div>
                         <h1 className="font-bold text-lg tracking-wide">DC QUOTE <span className="text-xs bg-dc-orange text-white px-2 py-1 rounded-full ml-1">PRO</span></h1>
                     </div>
                     
-                    {/* Navigation */}
                     <div className="flex-1 flex justify-center px-4 overflow-x-auto no-scrollbar mx-2">
                         <div className="flex items-center gap-1">
                             <NavButton active={view === 'overview'} onClick={() => setView('overview')} icon={Icons.Home} label="總覽" theme={theme} />
                             <NavButton active={view === 'dashboard'} onClick={() => setView('dashboard')} icon={Icons.FileText} label="報價單" theme={theme} />
+                            <NavButton active={view === 'history'} onClick={() => setView('history')} icon={Icons.Clock} label="歷史" theme={theme} />
                             <NavButton active={view === 'inquiries'} onClick={() => setView('inquiries')} icon={Icons.Inbox} label="需求" theme={theme} badge={inquiriesCount} />
                             <NavButton active={view === 'modules'} onClick={() => setView('modules')} icon={Icons.Layers} label="模組" theme={theme} />
                             <NavButton active={view === 'settings'} onClick={() => setView('settings')} icon={Icons.Settings} label="設定" theme={theme} />

@@ -1,4 +1,3 @@
-// src/components/Toast.jsx
 import React, { useState, createContext, useContext } from 'react';
 import { Icons } from '../assets/Icons';
 
@@ -21,7 +20,7 @@ export function ToastProvider({ children }) {
             {children}
             <div className="fixed bottom-5 right-5 z-[9999] flex flex-col gap-3 pointer-events-none">
                 {toasts.map(t => (
-                    <div key={t.id} className={`px-6 py-3 rounded-xl shadow-xl text-white flex items-center gap-3 animate-slide-in pointer-events-auto ${t.type === 'success' ? 'bg-green-600' : t.type === 'error' ? 'bg-red-600' : 'bg-blue-600'}`}>
+                    <div key={t.id} className={`px-6 py-3 rounded-xl shadow-xl text-white flex items-center gap-3 animate-fade-in pointer-events-auto ${t.type === 'success' ? 'bg-green-600' : t.type === 'error' ? 'bg-red-600' : 'bg-blue-600'}`}>
                         {t.type === 'success' ? <Icons.Success className="w-5 h-5"/> : t.type === 'error' ? <Icons.Error className="w-5 h-5"/> : <Icons.Info className="w-5 h-5"/>}
                         {t.message}
                     </div>

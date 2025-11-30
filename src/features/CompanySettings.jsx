@@ -1,8 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Icons } from '../assets/Icons';
+import { useToast } from '../components/Toast';
 
 export default function CompanySettings({ initialData, onSave, onCancel, theme }) {
-    const [formData, setFormData] = useState(initialData);
+    const toast = useToast();
+    const [formData, setFormData] = useState(initialData || {});
+    const [isSaving, setIsSaving] = useState(false);
+
+    // [修復] 確保資料載入時同步更新表單，避免 undefined
+    useEffect(() => {
+        if (initialData) {
+            setFormData(initialData);
+        }
+    }, [initialData]);
 
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -20,6 +30,20 @@ export default function CompanySettings({ initialData, onSave, onCancel, theme }
                 setFormData({ ...formData, logo: reader.result });
             };
             reader.readAsDataURL(file);
+        }
+    };
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        try {
+            // 呼叫 App.jsx 傳來的 onSave (這是 Promise)
+            await onSave(formData);
+            toast.show("設定已成功儲存！", "success");
+        } catch (error) {
+            console.error(error);
+            toast.show("儲存失敗，請稍後再試", "error");
+        } finally {
+            setIsSaving(false);
         }
     };
 
@@ -152,10 +176,11 @@ export default function CompanySettings({ initialData, onSave, onCancel, theme }
                     取消
                 </button>
                 <button 
-                    onClick={() => onSave(formData)} 
-                    className="px-6 py-3 bg-dc-orange text-white rounded-xl font-bold flex items-center gap-2 hover:shadow-lg transition hover:brightness-110"
+                    onClick={handleSave} 
+                    disabled={isSaving}
+                    className="px-6 py-3 bg-dc-orange text-white rounded-xl font-bold flex items-center gap-2 hover:shadow-lg transition hover:brightness-110 disabled:opacity-50"
                 >
-                    <Icons.Save className="w-5 h-5" /> 儲存設定
+                    {isSaving ? '儲存中...' : <><Icons.Save className="w-5 h-5" /> 儲存設定</>}
                 </button>
             </div>
         </div>

@@ -90,9 +90,7 @@ function App() {
         catch (error) { console.error(error); alert("登入失敗"); } 
     };
     
-    // [關鍵修正] 改為回傳 Promise，並清除 undefined 欄位，讓 CompanySettings 處理 UI 狀態
     const saveCompanyInfo = async (newInfo) => { 
-        // Firestore 不接受 undefined 值，使用 JSON 轉換技巧快速清除
         const cleanInfo = JSON.parse(JSON.stringify(newInfo));
         return await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'companySettings', 'info'), cleanInfo);
     };
@@ -130,14 +128,19 @@ function App() {
     return (
         <ToastProvider>
             <div className={`min-h-screen flex flex-col relative ${theme === 'dark' ? 'bg-dc-black text-dc-light' : 'bg-dc-light text-gray-800'}`}>
-                <header className={`border-b px-6 py-4 flex justify-between items-center sticky top-0 z-50 backdrop-blur-xl ${theme === 'dark' ? 'bg-dc-black/80 border-white/5' : 'bg-white/80 border-gray-200'}`}>
-                    <div className="flex items-center gap-3">
+                
+                {/* [修改] Header UI 優化 */}
+                <header className={`border-b px-3 md:px-6 py-3 md:py-4 flex justify-between items-center sticky top-0 z-50 backdrop-blur-xl ${theme === 'dark' ? 'bg-dc-black/80 border-white/5' : 'bg-white/80 border-gray-200'}`}>
+                    
+                    {/* 1. Logo 區塊：手機版隱藏 (hidden)，平板以上顯示 (md:flex) */}
+                    <div className="hidden md:flex items-center gap-3 shrink-0">
                         <div className="bg-dc-orange p-2 rounded-xl text-white shadow-lg"><Icons.FileText className="w-5 h-5" /></div>
                         <h1 className="font-bold text-lg tracking-wide">DC QUOTE <span className="text-xs bg-dc-orange text-white px-2 py-1 rounded-full ml-1">PRO</span></h1>
                     </div>
                     
-                    <div className="flex-1 flex justify-center px-4 overflow-x-auto no-scrollbar mx-2">
-                        <div className="flex items-center gap-1">
+                    {/* 2. 導航區塊：手機版靠左對齊 (justify-start) 並佔滿空間 */}
+                    <div className="flex-1 flex justify-start md:justify-center px-0 md:px-4 overflow-x-auto no-scrollbar mx-0 md:mx-2">
+                        <div className="flex items-center gap-1 md:gap-2 pr-2">
                             <NavButton active={view === 'overview'} onClick={() => setView('overview')} icon={Icons.Home} label="總覽" theme={theme} />
                             <NavButton active={view === 'dashboard'} onClick={() => setView('dashboard')} icon={Icons.FileText} label="報價單" theme={theme} />
                             <NavButton active={view === 'history'} onClick={() => setView('history')} icon={Icons.Clock} label="歷史" theme={theme} />
@@ -147,10 +150,10 @@ function App() {
                         </div>
                     </div>
 
-                    {/* User Actions */}
-                    <div className="flex items-center gap-3">
+                    {/* 3. 功能按鈕區塊：調整間距 */}
+                    <div className="flex items-center gap-2 md:gap-3 shrink-0">
                         <button onClick={toggleTheme} className={`p-2 rounded-full transition-all ${theme === 'dark' ? 'hover:bg-white/10' : 'hover:bg-gray-200'}`}>{theme === 'dark' ? <Icons.Sun className="w-5 h-5" /> : <Icons.Moon className="w-5 h-5" />}</button>
-                        <button onClick={() => setView('clientForm')} className="p-2 px-4 rounded-full flex items-center gap-2 text-white bg-dc-orange hover:scale-105 transition-all font-bold shadow-lg shadow-dc-orange/20"><Icons.Eye className="w-4 h-4" /> <span className="hidden lg:inline">前台</span></button>
+                        <button onClick={() => setView('clientForm')} className="p-2 px-3 md:px-4 rounded-full flex items-center gap-2 text-white bg-dc-orange hover:scale-105 transition-all font-bold shadow-lg shadow-dc-orange/20"><Icons.Eye className="w-4 h-4" /> <span className="hidden md:inline">前台</span></button>
                         <div className="hidden md:flex items-center gap-3 ml-1 pl-2 border-l border-gray-500/20">
                              <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-dc-orange">{user.photoURL ? <img src={user.photoURL} alt="User" /> : <div className="w-full h-full bg-dc-gray flex items-center justify-center text-white"><Icons.User className="w-4 h-4" /></div>}</div>
                         </div>
@@ -159,7 +162,7 @@ function App() {
                 </header>
 
                 {/* Main Content */}
-                <main className="flex-1 p-6 md:p-12 overflow-auto relative z-10">
+                <main className="flex-1 p-4 md:p-6 lg:p-12 overflow-auto relative z-10 pb-24">
                     {view === 'overview' && <DashboardOverview db={db} appId={appId} userId={user.uid} theme={theme} />}
                     {view === 'settings' && <CompanySettings initialData={companyInfo} onSave={saveCompanyInfo} onCancel={() => setView('overview')} theme={theme} />}
                     {view === 'modules' && <ModuleEditor templates={templates} db={db} appId={appId} userId={user.uid} theme={theme} />}

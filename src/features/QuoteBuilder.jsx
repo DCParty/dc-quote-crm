@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { addDoc, collection, getDocs, doc, setDoc } from "firebase/firestore";
+import { addDoc, collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from "firebase/firestore";
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { Icons } from '../assets/Icons';
@@ -9,8 +9,9 @@ import PDFContent from '../components/PDFContent';
 export default function QuoteBuilder({ templates, companyInfo, theme, db, appId, userId }) {
     const toast = useToast();
     
-    // [新增] 客戶列表狀態
     const [clients, setClients] = useState([]);
+    const [showClientManager, setShowClientManager] = useState(false); // 控制管理視窗
+    const [editingClient, setEditingClient] = useState(null); // 正在編輯的客戶
     
     const [quoteData, setQuoteData] = useState({ 
         clientName: "", clientPhone: "", clientEmail: "", 
@@ -21,14 +22,13 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
         title: "QUOTATION", 
         taxRate: 0.05,
         discount: 0,
-        versionNote: "" // [新增] 版本註記
+        versionNote: "" 
     });
     const [showPreview, setShowPreview] = useState(false);
     const [copied, setCopied] = useState(false);
     const dragItem = useRef();
     const dragOverItem = useRef();
 
-    // Hook for loading existing quote
     window.loadQuoteIntoBuilder = (inq) => setQuoteData({ 
         ...quoteData, 
         clientName: inq.clientName, 
@@ -36,26 +36,23 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
         clientEmail: inq.clientEmail || "", 
         items: inq.items || [], 
         note: inq.note || "",
-        // 如果載入的是歷史報價單，保留其註記，否則清空
         versionNote: inq.versionNote || "" 
     });
 
-    // [新增] 載入常用客戶列表
+    // [修改] 改為 onSnapshot 即時監聽，這樣新增/刪除/修改後下拉選單會馬上更新
     useEffect(() => {
-        const fetchClients = async () => {
-            if (!db || !userId) return;
-            const querySnapshot = await getDocs(collection(db, 'artifacts', appId, 'users', userId, 'clients'));
-            const clientList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        if (!db || !userId) return;
+        const unsubscribe = onSnapshot(collection(db, 'artifacts', appId, 'users', userId, 'clients'), (snapshot) => {
+            const clientList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setClients(clientList);
-        };
-        fetchClients();
+        });
+        return () => unsubscribe();
     }, [db, appId, userId]);
 
     useEffect(() => { 
         if (!quoteData.note && companyInfo.bankInfo) setQuoteData(prev => ({ ...prev, note: companyInfo.bankInfo })); 
     }, [companyInfo.bankInfo]);
 
-    // [新增] 處理選擇客戶
     const handleSelectClient = (e) => {
         const clientId = e.target.value;
         if (!clientId) return;
@@ -71,11 +68,9 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
         }
     };
 
-    // [新增] 儲存目前客戶到常用列表
     const saveClientToBank = async () => {
         if (!quoteData.clientName) return toast.show("請輸入客戶名稱", "error");
         try {
-            // 使用名稱作為 ID 避免重複，或者自動生成 ID
             const clientRef = doc(collection(db, 'artifacts', appId, 'users', userId, 'clients'));
             await setDoc(clientRef, {
                 name: quoteData.clientName,
@@ -84,12 +79,31 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
                 updatedAt: new Date()
             });
             toast.show("客戶已存入常用列表！", "success");
-            // 重新載入列表
-            const querySnapshot = await getDocs(collection(db, 'artifacts', appId, 'users', userId, 'clients'));
-            setClients(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         } catch (e) {
             console.error(e);
             toast.show("儲存客戶失敗", "error");
+        }
+    };
+
+    // [新增] 刪除客戶
+    const handleDeleteClient = async (id) => {
+        if (!confirm("確定要刪除此常用客戶嗎？")) return;
+        try {
+            await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'clients', id));
+            toast.show("客戶已刪除", "success");
+        } catch (e) {
+            toast.show("刪除失敗", "error");
+        }
+    };
+
+    // [新增] 更新客戶
+    const handleUpdateClient = async (id, newData) => {
+        try {
+            await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'clients', id), newData);
+            setEditingClient(null);
+            toast.show("客戶資料已更新", "success");
+        } catch (e) {
+            toast.show("更新失敗", "error");
         }
     };
 
@@ -222,7 +236,7 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
     }
 
     return (
-        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8 relative">
             <div className="lg:col-span-2 space-y-8">
                 <div className={`p-8 rounded-4xl border ${panelClass}`}>
                     <div className="flex justify-between items-center mb-6">
@@ -238,11 +252,18 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
                                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                              </select>
                              <button 
+                                onClick={() => setShowClientManager(true)}
+                                className="p-2 rounded-xl bg-gray-500/10 hover:bg-dc-orange hover:text-white transition text-dc-gray"
+                                title="管理常用客戶"
+                             >
+                                <Icons.Settings className="w-4 h-4" />
+                            </button>
+                             <button 
                                 onClick={saveClientToBank}
                                 className="p-2 rounded-xl bg-gray-500/10 hover:bg-dc-orange hover:text-white transition text-dc-gray"
                                 title="將目前客戶存入常用列表"
                              >
-                                <Icons.User className="w-4 h-4" />
+                                <Icons.Save className="w-4 h-4" />
                              </button>
                         </div>
                     </div>
@@ -256,7 +277,6 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
                         <input value={quoteData.clientEmail} onChange={e => setQuoteData({...quoteData, clientEmail: e.target.value})} className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="Email" />
                     </div>
 
-                    {/* [新增] 進階設定區塊：版本註記與稅率標題 */}
                     <div className="pt-6 border-t border-gray-500/20 grid grid-cols-3 gap-4">
                         <input value={quoteData.versionNote} onChange={e=>setQuoteData({...quoteData, versionNote: e.target.value})} className={`w-full p-2 text-sm rounded-xl border text-center ${inputClass}`} placeholder="版本註記 (例: V2, 9折)" />
                         <input value={quoteData.title} onChange={e=>setQuoteData({...quoteData, title: e.target.value})} className={`w-full p-2 text-sm rounded-xl border text-center ${inputClass}`} placeholder="文件標題" />
@@ -374,6 +394,49 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
                     </div>
                 </div>
             </div>
+
+            {/* Client Manager Modal */}
+            {showClientManager && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+                    <div className={`w-full max-w-lg p-6 rounded-3xl border shadow-2xl ${panelClass}`}>
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className={`text-xl font-bold ${theme==='dark'?'text-white':'text-gray-900'}`}>常用客戶管理</h3>
+                            <button onClick={() => { setShowClientManager(false); setEditingClient(null); }} className="p-2 rounded-full hover:bg-gray-500/10"><Icons.X className="w-5 h-5 text-dc-gray" /></button>
+                        </div>
+                        <div className="space-y-3 max-h-[60vh] overflow-y-auto custom-scrollbar pr-2">
+                            {clients.length === 0 && <p className="text-center text-dc-gray py-8">暫無儲存的客戶</p>}
+                            {clients.map(c => (
+                                <div key={c.id} className={`p-4 rounded-2xl border flex flex-col gap-2 ${theme==='dark'?'bg-black/20 border-white/10':'bg-gray-50 border-gray-200'}`}>
+                                    {editingClient?.id === c.id ? (
+                                        <div className="space-y-2">
+                                            <input value={editingClient.name} onChange={e=>setEditingClient({...editingClient, name:e.target.value})} className={`w-full p-2 text-sm rounded-lg border ${inputClass}`} placeholder="名稱" />
+                                            <input value={editingClient.phone} onChange={e=>setEditingClient({...editingClient, phone:e.target.value})} className={`w-full p-2 text-sm rounded-lg border ${inputClass}`} placeholder="電話" />
+                                            <input value={editingClient.email} onChange={e=>setEditingClient({...editingClient, email:e.target.value})} className={`w-full p-2 text-sm rounded-lg border ${inputClass}`} placeholder="Email" />
+                                            <div className="flex justify-end gap-2 mt-2">
+                                                <button onClick={()=>setEditingClient(null)} className="px-3 py-1 text-xs rounded-lg bg-gray-500/20 text-dc-gray">取消</button>
+                                                <button onClick={()=>handleUpdateClient(c.id, editingClient)} className="px-3 py-1 text-xs rounded-lg bg-dc-orange text-white">儲存</button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <h4 className={`font-bold ${theme==='dark'?'text-white':'text-gray-900'}`}>{c.name}</h4>
+                                                    <p className="text-xs text-dc-gray">{c.phone} | {c.email}</p>
+                                                </div>
+                                                <div className="flex gap-1">
+                                                    <button onClick={()=>setEditingClient(c)} className="p-2 hover:text-dc-orange text-dc-gray"><Icons.Edit className="w-4 h-4" /></button>
+                                                    <button onClick={()=>handleDeleteClient(c.id)} className="p-2 hover:text-red-500 text-dc-gray"><Icons.Trash2 className="w-4 h-4" /></button>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

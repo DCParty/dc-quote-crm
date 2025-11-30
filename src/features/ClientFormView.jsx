@@ -1,16 +1,12 @@
 import React, { useState } from 'react';
 import { addDoc, collection } from "firebase/firestore";
-// 這就是您問的那一行：引入 emailjs 套件，讓我們可以寄信
 import emailjs from '@emailjs/browser'; 
-// 引入 PDF 生成工具
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-
-// 引入我們自己寫的元件和工具
 import { Icons } from '../assets/Icons';
 import { useToast } from '../components/Toast';
-import PDFContent from '../components/PDFContent'; // 確保您有建立這個檔案
-import { DEFAULT_TEMPLATES } from '../lib/utils'; // 確保您有建立這個檔案
+import PDFContent from '../components/PDFContent';
+import { DEFAULT_TEMPLATES } from '../lib/utils';
 
 export default function ClientFormView({ templates, companyInfo, db, appId, userId, theme, toggleTheme, onExit }) {
     const toast = useToast();
@@ -27,7 +23,6 @@ export default function ClientFormView({ templates, companyInfo, db, appId, user
         let newErrors = {};
         if (!clientData.name.trim()) newErrors.name = "請輸入稱呼";
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientData.email)) newErrors.email = "Email 格式不正確";
-        // 寬鬆的電話驗證
         if (!/^(\+|00)?[0-9\-\s]{8,}$/.test(clientData.phone)) newErrors.phone = "電話格式不正確";
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
@@ -36,13 +31,13 @@ export default function ClientFormView({ templates, companyInfo, db, appId, user
     const handleSubmit = async () => {
         if (!validateForm()) return;
         setIsSubmitting(true);
-
-        // 準備資料
-        let allItems = [];
-        const sourceTemplates = templates.length > 0 ? templates : DEFAULT_TEMPLATES;
         
+        let allItems = [];
+        // 使用資料庫模組，若無則使用預設模組作為備案
+        const sourceTemplates = templates && templates.length > 0 ? templates : DEFAULT_TEMPLATES;
+
         selectedTemplateIds.forEach(id => { 
-            // 透過 ID 或名稱比對模組
+            // 透過 ID 或名稱比對模組 (相容預設模組沒有 ID 的情況)
             const t = sourceTemplates.find(temp => (temp.id || temp.name) === id); 
             if(t) {
                 allItems = [...allItems, ...t.items.map(i => ({ 
@@ -55,6 +50,17 @@ export default function ClientFormView({ templates, companyInfo, db, appId, user
 
         const quoteNo = `Q${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2,'0')}${String(Math.floor(Math.random()*1000)).padStart(3,'0')}`;
         
+        // [新增] 收集裝置與來源資訊 (GA-like Tracking)
+        const metadata = {
+            userAgent: navigator.userAgent,
+            screen: `${window.screen.width}x${window.screen.height}`,
+            language: navigator.language,
+            platform: navigator.platform || 'Unknown',
+            referrer: document.referrer || "Direct",
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            timestamp: new Date().toISOString()
+        };
+
         const finalData = { 
             clientName: clientData.name, 
             clientPhone: clientData.phone, 
@@ -64,7 +70,8 @@ export default function ClientFormView({ templates, companyInfo, db, appId, user
             date: new Date().toISOString().split('T')[0], 
             items: allItems, 
             status: 'new', 
-            timestamp: new Date() 
+            timestamp: new Date(),
+            meta: metadata // 寫入追蹤資料
         };
         
         try { 
@@ -81,7 +88,7 @@ export default function ClientFormView({ templates, companyInfo, db, appId, user
                         from_name: clientData.name, 
                         client_email: clientData.email, 
                         client_phone: clientData.phone, 
-                        message: `Inquiry: ${selectedTemplateIds.length} services. Note: ${clientData.note}`, 
+                        message: `Inquiry: ${selectedTemplateIds.length} services selected.\nNote: ${clientData.note}\n\n[Client Info]\nDevice: ${metadata.platform}\nSource: ${metadata.referrer}`, 
                         reply_to: clientData.email 
                     }, 
                     companyInfo.emailjsPublicKey
@@ -102,8 +109,8 @@ export default function ClientFormView({ templates, companyInfo, db, appId, user
     const panelClass = theme === 'dark' ? 'bg-dc-panel/80 border-white/10' : 'bg-white/90 border-gray-200 shadow-2xl';
     const inputClass = theme === 'dark' ? 'bg-dc-dark border-white/20 text-white focus:border-dc-orange' : 'bg-white border-gray-300 text-black focus:border-dc-orange';
     
-    // 使用預設模組作為備案
-    const activeTemplates = templates.length > 0 ? templates : DEFAULT_TEMPLATES;
+    // 確保有模組可選 (資料庫空時使用預設值)
+    const activeTemplates = templates && templates.length > 0 ? templates : DEFAULT_TEMPLATES;
 
     return (
         <div className={`min-h-screen font-sans transition-colors duration-300 ${bgClass} overflow-x-hidden relative pb-40`}>
@@ -127,7 +134,10 @@ export default function ClientFormView({ templates, companyInfo, db, appId, user
                         <button onClick={toggleTheme} className="p-3 rounded-full hover:bg-gray-500/10 transition">
                             {theme === 'dark' ? <Icons.Sun className="w-6 h-6" /> : <Icons.Moon className="w-6 h-6" />}
                         </button>
-                        <button onClick={onExit} className="text-base font-bold text-dc-gray hover:text-dc-orange transition">退出</button>
+                        {/* 如果是在前台模式 (onExit 導向首頁)，顯示登入/管理按鈕 */}
+                        <button onClick={onExit} className="text-base font-bold text-dc-gray hover:text-dc-orange transition">
+                             <Icons.User className="w-6 h-6" />
+                        </button>
                     </div>
                 </div>
                 
@@ -141,12 +151,13 @@ export default function ClientFormView({ templates, companyInfo, db, appId, user
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-32 relative z-20">
                             {activeTemplates.map((t, idx) => { 
-                                const isSelected = selectedTemplateIds.includes(t.id || t.name); 
-                                const key = t.id || t.name || idx;
+                                // 使用 id 或 name 作為 key (預設模組可能沒有 id)
+                                const uniqueKey = t.id || t.name || idx;
+                                const isSelected = selectedTemplateIds.includes(uniqueKey); 
                                 return (
                                     <div 
-                                        key={key} 
-                                        onClick={() => toggleTemplate(t.id || t.name)} 
+                                        key={uniqueKey} 
+                                        onClick={() => toggleTemplate(uniqueKey)} 
                                         className={`cursor-pointer p-8 rounded-4xl border-4 transition-all duration-300 relative overflow-hidden group backdrop-blur-sm 
                                             ${isSelected 
                                                 ? 'border-dc-orange bg-dc-orange/10 scale-[1.02] shadow-2xl' 
@@ -234,11 +245,17 @@ export default function ClientFormView({ templates, companyInfo, db, appId, user
                         <button 
                             onClick={() => { 
                                 const element = document.getElementById('hidden-pdf-content'); 
-                                // 這裡需要隱藏式渲染 PDFContent 才能截圖，
-                                // 但在 Vite 架構中，通常我們會直接把 PDFContent 渲染在畫面上給使用者看，
-                                // 或者用更進階的方式背景生成。這裡為了簡化，我們直接提供下載按鈕。
-                                // (實際應用中，您可能需要一個隱藏的 div 來 mount PDFContent)
-                                alert("PDF 生成功能在完整架構中需搭配隱藏渲染區塊，此處僅為示意。");
+                                // 這裡直接產生 PDF 並下載
+                                html2canvas(element, { scale: 2 }).then(canvas => {
+                                    const imgData = canvas.toDataURL('image/png');
+                                    const pdf = new jsPDF('p', 'mm', 'a4');
+                                    const imgWidth = 210;
+                                    const pageHeight = 297;
+                                    const imgHeight = canvas.height * imgWidth / canvas.width;
+                                    pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+                                    pdf.save(`報價單_${successData.quoteNo}.pdf`); 
+                                    toast.show("PDF 下載開始", "success");
+                                });
                             }} 
                             className="bg-dc-orange text-white px-10 py-4 rounded-full font-bold text-lg hover:scale-105 transition-all flex items-center gap-3 shadow-xl mb-6"
                         >
@@ -249,8 +266,8 @@ export default function ClientFormView({ templates, companyInfo, db, appId, user
                             發起新的詢價
                         </button>
                         
-                        {/* 隱藏的 PDF 內容，用於生成截圖 */}
-                        <div className="absolute top-0 left-[-9999px]">
+                        {/* 隱藏的 PDF 內容，用於生成截圖 (只在最後一步渲染) */}
+                        <div id="hidden-pdf-content" className="absolute top-0 left-[-9999px]">
                             <PDFContent data={successData} />
                         </div>
                     </div>

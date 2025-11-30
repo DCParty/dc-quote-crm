@@ -4,13 +4,28 @@ import { useToast } from '../components/Toast';
 
 export default function CompanySettings({ initialData, onSave, onCancel, theme }) {
     const toast = useToast();
-    const [formData, setFormData] = useState(initialData || {});
+    const [formData, setFormData] = useState({
+        websites: [''], // 預設至少有一個網站欄位
+        ...initialData
+    });
     const [isSaving, setIsSaving] = useState(false);
 
-    // [修復] 確保資料載入時同步更新表單，避免 undefined
+    // [修復] 確保資料載入時同步更新表單，並處理舊資料相容
     useEffect(() => {
         if (initialData) {
-            setFormData(initialData);
+            let data = { ...initialData };
+            
+            // 資料遷移：如果舊資料有 website (單數) 但沒有 websites (複數)
+            if (data.website && (!data.websites || data.websites.length === 0)) {
+                data.websites = [data.website];
+            }
+            
+            // 確保 websites 至少有一個空字串，讓 UI 有欄位顯示
+            if (!data.websites || !Array.isArray(data.websites) || data.websites.length === 0) {
+                data.websites = [''];
+            }
+            
+            setFormData(data);
         }
     }, [initialData]);
 
@@ -18,11 +33,31 @@ export default function CompanySettings({ initialData, onSave, onCancel, theme }
         setFormData({ ...formData, [e.target.name]: e.target.value });
     };
 
+    // [新增] 處理多個網站輸入
+    const handleWebsiteChange = (index, value) => {
+        const newWebsites = [...formData.websites];
+        newWebsites[index] = value;
+        setFormData({ ...formData, websites: newWebsites });
+    };
+
+    // [新增] 增加網站欄位
+    const addWebsite = () => {
+        setFormData(prev => ({ ...prev, websites: [...prev.websites, ''] }));
+    };
+
+    // [新增] 移除網站欄位
+    const removeWebsite = (index) => {
+        const newWebsites = formData.websites.filter((_, i) => i !== index);
+        // 如果刪光了，自動補回一個空的，避免欄位消失
+        if (newWebsites.length === 0) newWebsites.push('');
+        setFormData({ ...formData, websites: newWebsites });
+    };
+
     const handleLogo = (e) => {
         const file = e.target.files[0];
         if (file) {
             if (file.size > 500 * 1024) {
-                alert("Logo 檔案過大，建議小於 500KB 以確保 PDF 生成順利");
+                toast.show("Logo 檔案過大，建議小於 500KB", "error");
                 return;
             }
             const reader = new FileReader();
@@ -36,8 +71,13 @@ export default function CompanySettings({ initialData, onSave, onCancel, theme }
     const handleSave = async () => {
         setIsSaving(true);
         try {
-            // 呼叫 App.jsx 傳來的 onSave (這是 Promise)
-            await onSave(formData);
+            // 儲存前過濾掉空白的網站網址
+            const cleanData = {
+                ...formData,
+                websites: formData.websites.filter(url => url.trim() !== '')
+            };
+            
+            await onSave(cleanData);
             toast.show("設定已成功儲存！", "success");
         } catch (error) {
             console.error(error);
@@ -81,13 +121,35 @@ export default function CompanySettings({ initialData, onSave, onCancel, theme }
                         className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} 
                         placeholder="公司名稱" 
                     />
-                    <input 
-                        name="website" 
-                        value={formData.website || ''} 
-                        onChange={handleChange} 
-                        className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} 
-                        placeholder="網站連結 (例如: https://...)" 
-                    />
+                    
+                    {/* [修改] 多網站管理區塊 */}
+                    <div className="space-y-2">
+                        <label className={`text-xs font-bold ml-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>官方網站連結</label>
+                        {formData.websites.map((site, index) => (
+                            <div key={index} className="flex gap-2 items-center group">
+                                <input 
+                                    value={site} 
+                                    onChange={(e) => handleWebsiteChange(index, e.target.value)} 
+                                    className={`flex-1 p-4 rounded-2xl border text-lg ${inputClass}`} 
+                                    placeholder="https://..." 
+                                />
+                                <button 
+                                    onClick={() => removeWebsite(index)}
+                                    className="p-4 rounded-2xl border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors"
+                                    title="移除此連結"
+                                >
+                                    <Icons.Trash2 className="w-5 h-5" />
+                                </button>
+                            </div>
+                        ))}
+                        <button 
+                            onClick={addWebsite}
+                            className={`w-full py-3 rounded-2xl border border-dashed flex items-center justify-center gap-2 transition-all ${theme === 'dark' ? 'border-white/10 text-gray-400 hover:border-dc-orange hover:text-dc-orange' : 'border-gray-300 text-gray-500 hover:border-dc-orange hover:text-dc-orange'}`}
+                        >
+                            <Icons.Plus className="w-4 h-4" /> 新增另一個網站
+                        </button>
+                    </div>
+
                     <input 
                         name="description" 
                         value={formData.description || ''} 

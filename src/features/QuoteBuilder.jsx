@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { addDoc, collection } from "firebase/firestore";
+import { addDoc, collection, getDocs, doc, setDoc } from "firebase/firestore";
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { Icons } from '../assets/Icons';
@@ -8,6 +8,10 @@ import PDFContent from '../components/PDFContent';
 
 export default function QuoteBuilder({ templates, companyInfo, theme, db, appId, userId }) {
     const toast = useToast();
+    
+    // [新增] 客戶列表狀態
+    const [clients, setClients] = useState([]);
+    
     const [quoteData, setQuoteData] = useState({ 
         clientName: "", clientPhone: "", clientEmail: "", 
         quoteNo: `Q${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2,'0')}${String(Math.floor(Math.random()*100)).padStart(2,'0')}`, 
@@ -16,7 +20,8 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
         note: "",
         title: "QUOTATION", 
         taxRate: 0.05,
-        discount: 0
+        discount: 0,
+        versionNote: "" // [新增] 版本註記
     });
     const [showPreview, setShowPreview] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -27,15 +32,66 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
     window.loadQuoteIntoBuilder = (inq) => setQuoteData({ 
         ...quoteData, 
         clientName: inq.clientName, 
-        clientPhone: inq.clientPhone, 
-        clientEmail: inq.clientEmail, 
-        items: inq.items, 
-        note: inq.note || "" 
+        clientPhone: inq.clientPhone || "", 
+        clientEmail: inq.clientEmail || "", 
+        items: inq.items || [], 
+        note: inq.note || "",
+        // 如果載入的是歷史報價單，保留其註記，否則清空
+        versionNote: inq.versionNote || "" 
     });
+
+    // [新增] 載入常用客戶列表
+    useEffect(() => {
+        const fetchClients = async () => {
+            if (!db || !userId) return;
+            const querySnapshot = await getDocs(collection(db, 'artifacts', appId, 'users', userId, 'clients'));
+            const clientList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setClients(clientList);
+        };
+        fetchClients();
+    }, [db, appId, userId]);
 
     useEffect(() => { 
         if (!quoteData.note && companyInfo.bankInfo) setQuoteData(prev => ({ ...prev, note: companyInfo.bankInfo })); 
     }, [companyInfo.bankInfo]);
+
+    // [新增] 處理選擇客戶
+    const handleSelectClient = (e) => {
+        const clientId = e.target.value;
+        if (!clientId) return;
+        const selectedClient = clients.find(c => c.id === clientId);
+        if (selectedClient) {
+            setQuoteData(prev => ({
+                ...prev,
+                clientName: selectedClient.name,
+                clientPhone: selectedClient.phone,
+                clientEmail: selectedClient.email
+            }));
+            toast.show("已帶入客戶資料", "success");
+        }
+    };
+
+    // [新增] 儲存目前客戶到常用列表
+    const saveClientToBank = async () => {
+        if (!quoteData.clientName) return toast.show("請輸入客戶名稱", "error");
+        try {
+            // 使用名稱作為 ID 避免重複，或者自動生成 ID
+            const clientRef = doc(collection(db, 'artifacts', appId, 'users', userId, 'clients'));
+            await setDoc(clientRef, {
+                name: quoteData.clientName,
+                phone: quoteData.clientPhone,
+                email: quoteData.clientEmail,
+                updatedAt: new Date()
+            });
+            toast.show("客戶已存入常用列表！", "success");
+            // 重新載入列表
+            const querySnapshot = await getDocs(collection(db, 'artifacts', appId, 'users', userId, 'clients'));
+            setClients(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        } catch (e) {
+            console.error(e);
+            toast.show("儲存客戶失敗", "error");
+        }
+    };
 
     const addItem = (tId) => { 
         const t = templates.find(temp => temp.id === tId); 
@@ -171,18 +227,40 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
                 <div className={`p-8 rounded-4xl border ${panelClass}`}>
                     <div className="flex justify-between items-center mb-6">
                         <h2 className={`text-xl font-bold flex items-center gap-3 ${theme==='dark'?'text-white':'text-gray-800'}`}><span className="bg-dc-orange w-2 h-8 rounded-full"></span> 1. 基本資訊</h2>
-                        <div className="flex gap-2">
-                            <input value={quoteData.title} onChange={e=>setQuoteData({...quoteData, title: e.target.value})} className={`w-32 p-2 text-sm rounded-xl border text-center ${inputClass}`} placeholder="標題" />
-                            <input type="number" step="0.01" value={quoteData.taxRate} onChange={e=>setQuoteData({...quoteData, taxRate: parseFloat(e.target.value)})} className={`w-20 p-2 text-sm rounded-xl border text-center ${inputClass}`} placeholder="稅率" />
+                        
+                        {/* 快速選擇客戶與儲存 */}
+                        <div className="flex gap-2 items-center">
+                             <select 
+                                onChange={handleSelectClient}
+                                className={`p-2 text-sm rounded-xl border outline-none ${inputClass} max-w-[120px]`}
+                             >
+                                <option value="">選擇常用客戶...</option>
+                                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                             </select>
+                             <button 
+                                onClick={saveClientToBank}
+                                className="p-2 rounded-xl bg-gray-500/10 hover:bg-dc-orange hover:text-white transition text-dc-gray"
+                                title="將目前客戶存入常用列表"
+                             >
+                                <Icons.User className="w-4 h-4" />
+                             </button>
                         </div>
                     </div>
+
                     <div className="grid grid-cols-2 gap-6 mb-6">
                         <input value={quoteData.clientName} onChange={e => setQuoteData({...quoteData, clientName: e.target.value})} className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="客戶名稱" />
                         <input value={quoteData.quoteNo} onChange={e => setQuoteData({...quoteData, quoteNo: e.target.value})} className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="單號" />
                     </div>
-                    <div className="grid grid-cols-2 gap-6">
+                    <div className="grid grid-cols-2 gap-6 mb-6">
                         <input value={quoteData.clientPhone} onChange={e => setQuoteData({...quoteData, clientPhone: e.target.value})} className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="電話" />
                         <input value={quoteData.clientEmail} onChange={e => setQuoteData({...quoteData, clientEmail: e.target.value})} className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="Email" />
+                    </div>
+
+                    {/* [新增] 進階設定區塊：版本註記與稅率標題 */}
+                    <div className="pt-6 border-t border-gray-500/20 grid grid-cols-3 gap-4">
+                        <input value={quoteData.versionNote} onChange={e=>setQuoteData({...quoteData, versionNote: e.target.value})} className={`w-full p-2 text-sm rounded-xl border text-center ${inputClass}`} placeholder="版本註記 (例: V2, 9折)" />
+                        <input value={quoteData.title} onChange={e=>setQuoteData({...quoteData, title: e.target.value})} className={`w-full p-2 text-sm rounded-xl border text-center ${inputClass}`} placeholder="文件標題" />
+                        <input type="number" step="0.01" value={quoteData.taxRate} onChange={e=>setQuoteData({...quoteData, taxRate: parseFloat(e.target.value)})} className={`w-full p-2 text-sm rounded-xl border text-center ${inputClass}`} placeholder="稅率 (0.05)" />
                     </div>
                 </div>
 
@@ -296,27 +374,6 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
                     </div>
                 </div>
             </div>
-        </div>
-    );
-}
-
-// --- Company Settings ---
-function CompanySettings({ initialData, onSave, onCancel, theme }) {
-    const [formData, setFormData] = useState(initialData);
-    const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
-    const handleLogo = (e) => { const f = e.target.files[0]; if(f){ if(f.size>500*1024)return alert("太大"); const r = new FileReader(); r.onloadend=()=>setFormData({...formData,logo:r.result}); r.readAsDataURL(f); }};
-    const panelClass = theme === 'dark' ? 'bg-dc-panel border-white/10' : 'bg-white border-gray-200 shadow-md';
-    const inputClass = theme === 'dark' ? 'bg-dc-dark border-white/10 text-white' : 'bg-gray-50 border-gray-300 text-black';
-
-    return (
-        <div className={`max-w-3xl mx-auto p-10 rounded-4xl border animate-fade-in ${panelClass}`}>
-            <h2 className={`text-2xl font-bold mb-8 flex items-center gap-3 ${theme==='dark'?'text-white':'text-gray-800'}`}><Icons.Settings className="w-6 h-6 text-dc-orange"/> 公司設定</h2>
-            <div className="grid md:grid-cols-3 gap-8">
-                <div className="text-center"><div className="w-36 h-36 mx-auto rounded-full border-2 border-dashed border-gray-500 flex items-center justify-center overflow-hidden mb-4 relative group">{formData.logo ? <img src={formData.logo} className="w-full h-full object-cover"/> : <span className="text-gray-500 text-sm">Logo</span>}<input type="file" accept="image/*" onChange={handleLogo} className="absolute inset-0 opacity-0 cursor-pointer" /><div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 text-white text-sm pointer-events-none font-bold">更換圖片</div></div></div>
-                <div className="md:col-span-2 space-y-5"><input name="name" value={formData.name} onChange={handleChange} className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="公司名稱" /><input name="website" value={formData.website} onChange={handleChange} className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="網站" /><input name="description" value={formData.description} onChange={handleChange} className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="簡介" /><div className="grid grid-cols-2 gap-5"><input name="taxId" value={formData.taxId} onChange={handleChange} className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="統編" /><input name="phone" value={formData.phone} onChange={handleChange} className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="電話" /></div><input name="address" value={formData.address} onChange={handleChange} className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="地址" /><input name="email" value={formData.email} onChange={handleChange} className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="Email" /><textarea name="bankInfo" value={formData.bankInfo} onChange={handleChange} rows="3" className={`w-full p-4 rounded-2xl border text-lg ${inputClass}`} placeholder="匯款資訊與備註" /></div>
-            </div>
-            <div className="mt-8 pt-8 border-t border-gray-500/20"><h3 className={`text-lg font-bold mb-4 flex items-center gap-2 ${theme==='dark'?'text-white':'text-gray-800'}`}><Icons.Mail className="w-5 h-5 text-dc-orange"/> Email 通知設定 (EmailJS)</h3><div className="grid md:grid-cols-3 gap-4"><input name="emailjsServiceId" value={formData.emailjsServiceId || ''} onChange={handleChange} className={`w-full p-3 rounded-xl border text-sm ${inputClass}`} placeholder="Service ID" /><input name="emailjsTemplateId" value={formData.emailjsTemplateId || ''} onChange={handleChange} className={`w-full p-3 rounded-xl border text-sm ${inputClass}`} placeholder="Template ID" /><input name="emailjsPublicKey" value={formData.emailjsPublicKey || ''} onChange={handleChange} className={`w-full p-3 rounded-xl border text-sm ${inputClass}`} placeholder="Public Key" /></div><p className="text-xs text-gray-500 mt-2">請至 EmailJS 申請並填入金鑰，以啟用客戶送單時的自動寄信功能。</p></div>
-            <div className="flex justify-end gap-4 mt-8 pt-6 border-t border-gray-500/20"><button onClick={onCancel} className="px-6 py-3 rounded-xl border text-gray-500 hover:bg-gray-100 font-bold">取消</button><button onClick={()=>onSave(formData)} className="px-6 py-3 bg-dc-orange text-white rounded-xl font-bold flex items-center gap-2 hover:shadow-lg transition"><Icons.Save className="w-5 h-5"/> 儲存設定</button></div>
         </div>
     );
 }

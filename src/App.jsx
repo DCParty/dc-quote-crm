@@ -90,7 +90,7 @@ function App() {
         catch (error) { console.error(error); alert("登入失敗"); } 
     };
     
-    // [修正] 改為回傳 Promise，並清除 undefined 欄位，讓 CompanySettings 處理 UI 狀態
+    // [關鍵修正] 改為回傳 Promise，並清除 undefined 欄位，讓 CompanySettings 處理 UI 狀態
     const saveCompanyInfo = async (newInfo) => { 
         // Firestore 不接受 undefined 值，使用 JSON 轉換技巧快速清除
         const cleanInfo = JSON.parse(JSON.stringify(newInfo));

@@ -163,35 +163,35 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
         } catch (e) { toast.show("儲存失敗", "error"); }
     };
 
-    // [修復] 穩定的 PDF 下載邏輯
+    // [修復] 使用 position: fixed 移出畫面外，而非 display: none
     const handleDownloadPDF = async () => {
         const element = pdfRef.current;
         if (!element) return toast.show("PDF 渲染錯誤", "error");
+        
         toast.show("正在生成 PDF...", "info");
         
-        try {
-            // 暫時將隱藏的 PDF 內容顯示出來，但移到螢幕外，確保 html2canvas 能抓到
-            element.style.display = 'block';
-            element.style.position = 'absolute';
-            element.style.left = '-9999px';
-            element.style.top = '0';
-
-            const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false });
-            const imgData = canvas.toDataURL('image/png');
-            const pdf = new jsPDF('p', 'mm', 'a4');
-            const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-            
-            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-            pdf.save(`Quote_${quoteData.quoteNo}.pdf`);
-            
-            element.style.display = 'none'; // 恢復隱藏
-            toast.show("下載完成！", "success");
-        } catch (err) {
-            console.error(err);
-            toast.show("PDF 生成失敗", "error");
-            if (element) element.style.display = 'none';
-        }
+        // 稍微延遲一下，確保 DOM 狀態
+        setTimeout(() => {
+            html2canvas(element, { 
+                scale: 2, 
+                useCORS: true, 
+                logging: false,
+                windowWidth: element.scrollWidth,
+                windowHeight: element.scrollHeight
+            }).then(canvas => {
+                const imgData = canvas.toDataURL('image/png');
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                
+                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                pdf.save(`Quote_${quoteData.quoteNo}.pdf`);
+                toast.show("下載完成！", "success");
+            }).catch(err => {
+                console.error(err);
+                toast.show("PDF 生成失敗", "error");
+            });
+        }, 100);
     };
 
     const panelClass = theme === 'dark' ? 'bg-dc-panel border-white/10' : 'bg-white border-gray-200 shadow-sm';
@@ -205,13 +205,13 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
                     <button onClick={handleDownloadPDF} className="bg-dc-orange text-white px-6 py-3 rounded-xl shadow-lg hover:scale-105 transition flex items-center gap-2 font-bold"><Icons.Download className="w-5 h-5" /> 下載 PDF</button>
                 </div>
                 
-                {/* 預覽區塊 (響應式，適合在瀏覽器查看) */}
+                {/* 預覽區塊 */}
                 <div className="shadow-2xl overflow-hidden rounded-lg">
                     <PDFContent data={{...quoteData, companyInfo}} />
                 </div>
 
-                {/* [關鍵] 隱藏的標準 A4 寬度渲染區 (專門用於截圖生成 PDF) */}
-                <div ref={pdfRef} style={{ display: 'none', width: '210mm', backgroundColor: 'white' }}>
+                {/* [關鍵] 修復：保持 render 但移出畫面 */}
+                <div ref={pdfRef} style={{ position: 'fixed', left: '-10000px', top: 0, width: '210mm', backgroundColor: 'white', zIndex: -1 }}>
                     <PDFContent id="pdf-hidden-source" data={{...quoteData, companyInfo}} />
                 </div>
             </div>
@@ -235,7 +235,6 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
                         </div>
                     </div>
 
-                    {/* [優化] 手機版單欄，電腦版雙欄 */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                         <input value={quoteData.clientName} onChange={e => setQuoteData({...quoteData, clientName: e.target.value})} className={`w-full p-3 rounded-xl border text-base ${inputClass}`} placeholder="客戶名稱" />
                         <input value={quoteData.quoteNo} onChange={e => setQuoteData({...quoteData, quoteNo: e.target.value})} className={`w-full p-3 rounded-xl border text-base ${inputClass}`} placeholder="單號" />
@@ -244,7 +243,6 @@ export default function QuoteBuilder({ templates, companyInfo, theme, db, appId,
                         <input value={quoteData.clientPhone} onChange={e => setQuoteData({...quoteData, clientPhone: e.target.value})} className={`w-full p-3 rounded-xl border text-base ${inputClass}`} placeholder="電話" />
                         <input value={quoteData.clientEmail} onChange={e => setQuoteData({...quoteData, clientEmail: e.target.value})} className={`w-full p-3 rounded-xl border text-base ${inputClass}`} placeholder="Email" />
                     </div>
-
                     <div className="pt-4 border-t border-gray-500/10 grid grid-cols-2 sm:grid-cols-3 gap-4">
                         <input value={quoteData.versionNote} onChange={e=>setQuoteData({...quoteData, versionNote: e.target.value})} className={`w-full p-2 text-sm rounded-lg border text-center ${inputClass}`} placeholder="版本註記 (V2)" />
                         <input value={quoteData.title} onChange={e=>setQuoteData({...quoteData, title: e.target.value})} className={`w-full p-2 text-sm rounded-lg border text-center ${inputClass}`} placeholder="文件標題" />
